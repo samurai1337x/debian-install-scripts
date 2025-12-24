@@ -1,12 +1,25 @@
 #!/usr/bin/env bash
+set -e
 
 # ---------------------------------------------------------
-# Remove old Cloudflared repo & key (avoid conflicts)
+# Detect OS
+# ---------------------------------------------------------
+. /etc/os-release
+
+if [[ "$ID" != "ubuntu" && "$ID" != "debian" ]]; then
+    echo "Unsupported OS: $ID"
+    exit 1
+fi
+
+echo "Detected OS: $PRETTY_NAME"
+
+# ---------------------------------------------------------
+# Remove old Cloudflared repo & keys
 # ---------------------------------------------------------
 sudo rm -f /etc/apt/sources.list.d/cloudflared.list
 sudo rm -f /etc/apt/sources.list.d/cloudflared.sources
-sudo rm -f /usr/share/keyrings/cloudflare-main.gpg
-sudo rm -f /etc/apt/keyrings/cloudflare-main.asc
+sudo rm -f /etc/apt/keyrings/cloudflare-main.gpg
+sudo rm -f /etc/apt/keyrings/cloudflare-secondary.gpg
 
 # ---------------------------------------------------------
 # Install prerequisites
@@ -15,34 +28,49 @@ sudo apt update
 sudo apt install -y ca-certificates curl gnupg
 
 # ---------------------------------------------------------
-# Add Cloudflare GPG key
+# Install Cloudflare GPG key(s)
 # ---------------------------------------------------------
 sudo install -m 0755 -d /etc/apt/keyrings
+
+# Main key (required everywhere)
 curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
-    | sudo tee /etc/apt/keyrings/cloudflare-main.asc >/dev/null
-sudo chmod a+r /etc/apt/keyrings/cloudflare-main.asc
+  | sudo gpg --dearmor \
+  | sudo tee /etc/apt/keyrings/cloudflare-main.gpg >/dev/null
+
+# Secondary key (Debian only)
+if [[ "$ID" == "debian" ]]; then
+  curl -fsSL https://pkg.cloudflare.com/cloudflare-secondary.gpg \
+    | sudo gpg --dearmor \
+    | sudo tee /etc/apt/keyrings/cloudflare-secondary.gpg >/dev/null
+fi
+
+sudo chmod a+r /etc/apt/keyrings/cloudflare-*.gpg
 
 # ---------------------------------------------------------
-# Load OS info
+# Determine Cloudflare suite
 # ---------------------------------------------------------
-. /etc/os-release
+CF_CODENAME="$VERSION_CODENAME"
 
-# Force Bookworm for Trixie (Cloudflare does NOT provide trixie repo)
-if [ "$VERSION_CODENAME" = "trixie" ]; then
+# Debian testing fallback
+if [[ "$ID" == "debian" && ( "$VERSION_CODENAME" == "trixie" || "$VERSION_CODENAME" == "sid" ) ]]; then
     CF_CODENAME="bookworm"
-else
-    CF_CODENAME="$VERSION_CODENAME"
 fi
 
 # ---------------------------------------------------------
-# Add Cloudflare repo using correct URL
+# Add Cloudflared repository
 # ---------------------------------------------------------
+if [[ "$ID" == "ubuntu" ]]; then
+  SIGNED_BY="/etc/apt/keyrings/cloudflare-main.gpg"
+else
+  SIGNED_BY="/etc/apt/keyrings/cloudflare-main.gpg /etc/apt/keyrings/cloudflare-secondary.gpg"
+fi
+
 sudo tee /etc/apt/sources.list.d/cloudflared.sources >/dev/null <<EOF
 Types: deb
 URIs: https://pkg.cloudflare.com/cloudflared
 Suites: $CF_CODENAME
 Components: main
-Signed-By: /etc/apt/keyrings/cloudflare-main.asc
+Signed-By: $SIGNED_BY
 EOF
 
 # ---------------------------------------------------------
@@ -50,3 +78,8 @@ EOF
 # ---------------------------------------------------------
 sudo apt update
 sudo apt install -y cloudflared
+
+# ---------------------------------------------------------
+# Verify
+# ---------------------------------------------------------
+cloudflared --version
