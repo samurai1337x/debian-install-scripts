@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+set -e
+
+# ---------------------------------------------------------
+# Detect OS
+# ---------------------------------------------------------
+. /etc/os-release
+
+if [[ "$ID" == "ubuntu" || "$ID" == "debian" ]]; then
+    DOCKER_OS="$ID"
+else
+    echo "Unsupported OS: $ID"
+    exit 1
+fi
+
+echo "Detected OS: $PRETTY_NAME"
 
 # ---------------------------------------------------------
 # Remove conflicting Docker-related packages
@@ -12,7 +27,7 @@ if [ -n "$CONFLICT_PKGS" ]; then
 fi
 
 # ---------------------------------------------------------
-# Clean any old Docker sources to avoid Signed-By conflicts
+# Clean old Docker sources
 # ---------------------------------------------------------
 sudo rm -f /etc/apt/sources.list.d/docker.list
 sudo rm -f /etc/apt/sources.list.d/docker.sources
@@ -26,31 +41,26 @@ sudo apt update
 sudo apt install -y ca-certificates curl
 
 # ---------------------------------------------------------
-# Add Docker's official GPG key
+# Add Docker GPG key
 # ---------------------------------------------------------
 sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/debian/gpg \
+sudo curl -fsSL https://download.docker.com/linux/$DOCKER_OS/gpg \
     -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
 
 # ---------------------------------------------------------
-# Load OS release info
-# ---------------------------------------------------------
-. /etc/os-release
-
-# ---------------------------------------------------------
-# Add Docker repository using modern .sources format
+# Add Docker repository (.sources format)
 # ---------------------------------------------------------
 sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
 Types: deb
-URIs: https://download.docker.com/linux/debian
+URIs: https://download.docker.com/linux/$DOCKER_OS
 Suites: $VERSION_CODENAME
 Components: stable
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
 
 # ---------------------------------------------------------
-# Install Docker Engine + CLI + Compose + Buildx
+# Install Docker Engine + CLI + plugins
 # ---------------------------------------------------------
 sudo apt update
 sudo apt install -y \
@@ -59,3 +69,9 @@ sudo apt install -y \
     containerd.io \
     docker-buildx-plugin \
     docker-compose-plugin
+
+# ---------------------------------------------------------
+# Post-install message
+# ---------------------------------------------------------
+echo "Docker installed successfully."
+echo "Run: sudo usermod -aG docker \$USER && newgrp docker"
